@@ -16,7 +16,7 @@ import (
 func TestMergingDigest(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 
 	for i := 0; i < 100000; i++ {
 		td.Add(rand.Float64(), 1.0)
@@ -32,14 +32,17 @@ func TestMergingDigest(t *testing.T) {
 }
 
 func TestMergeSparseDigest(t *testing.T) {
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	td.Add(-200000, 1)
-	other := NewMerging(1000, false)
+	other := NewMerging(1000)
 	other.Add(200000, 1)
 
 	td.Merge(other)
-	validateMergingDigest(t, td)
+	validateSparseDigest(t, td, other)
+}
 
+func validateSparseDigest(t *testing.T, td *MergingDigest, other *MergingDigest) {
+	validateMergingDigest(t, td)
 	assert.InEpsilon(t, 0.5, td.CDF(0), 0.02, "cdf below 0 was %v, not ~50%", td.CDF(0))
 	// epsilon-style ULP comparisons do not work on zero
 	assert.InDelta(t, 0, td.Quantile(0.5), 0.02, "median was %v, not 0", td.Quantile(0.5))
@@ -47,6 +50,17 @@ func TestMergeSparseDigest(t *testing.T) {
 	assert.InEpsilon(t, td.Max(), td.Quantile(1), 0.02, "maximum was %v", td.Quantile(1))
 	assert.InDelta(t, 0, td.Sum(), 0.01)
 	assert.InDelta(t, 0, other.ReciprocalSum(), 0.01)
+}
+
+func TestMergeDataOnlySparseDigest(t *testing.T) {
+	td := NewMerging(1000)
+	td.Add(-200000, 1)
+	other := NewMerging(1000)
+	other.Add(200000, 1)
+
+	td.MergeData(other.Data())
+
+	validateSparseDigest(t, td, other)
 }
 
 // check the basic validity of a merging t-digest
@@ -77,7 +91,7 @@ func validateMergingDigest(t *testing.T, td *MergingDigest) {
 func TestGobEncoding(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	for i := 0; i < 1000; i++ {
 		td.Add(rand.Float64(), 1.0)
 	}
@@ -86,7 +100,7 @@ func TestGobEncoding(t *testing.T) {
 	buf, err := td.GobEncode()
 	assert.NoError(t, err, "should have encoded successfully")
 
-	td2 := NewMerging(1000, false)
+	td2 := NewMerging(1000)
 	assert.NoError(t, td2.GobDecode(buf), "should have decoded successfully")
 
 	assert.InEpsilon(t, td.Count(), td2.Count(), 0.02, "counts did not match")
@@ -115,7 +129,7 @@ func serializeGob(t *testing.T, buf []byte, fname string) error {
 }
 
 func encodedGob(t *testing.T) ([]byte, error) {
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	for i := 0; i < 1000; i++ {
 		td.Add(float64(i), 1.0)
 	}
@@ -143,7 +157,7 @@ func TestGobDecodeOldGob(t *testing.T) {
 	//gobTDigest, _ := encodedGob(t)
 	//require.NoError(t, serializeGob(t, gobTDigest, "oldgob.base64"))
 
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	buf := deserializeGob(t, "oldgob.base64")
 	assert.NoError(t, td.GobDecode(buf), "should have decoded successfully")
 
@@ -161,7 +175,7 @@ func TestGobDecodeOldGob(t *testing.T) {
 func TestMergingDigestData(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	for i := 0; i < 1000; i++ {
 		td.Add(rand.Float64(), 1.0)
 	}
@@ -170,17 +184,47 @@ func TestMergingDigestData(t *testing.T) {
 	// Convert to a MergingDigestData and back again
 	td2 := NewMergingFromData(td.Data())
 
+	showEqualUpTo(t, td, td2)
+
+	for i := 0; i < 1000; i++ {
+		td.Add(rand.Float64(), 1.0)
+	}
+	assert.NotEqual(t, td.mainCentroids, td2.mainCentroids)
+}
+
+func TestClone(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+
+	td := NewMerging(1000)
+	for i := 0; i < 1000; i++ {
+		td.Add(rand.Float64(), 1.0)
+	}
+	validateMergingDigest(t, td)
+
+	// Convert to a MergingDigestData and back again
+	td2 := td.Clone()
+
+	showEqualUpTo(t, td, td2)
+
+	for i := 0; i < 1000; i++ {
+		td.Add(rand.Float64(), 1.0)
+	}
+	assert.NotEqual(t, td.mainCentroids, td2.mainCentroids)
+}
+
+func showEqualUpTo(t *testing.T, td *MergingDigest, td2 *MergingDigest) {
 	assert.InEpsilon(t, td.Count(), td2.Count(), 0.02, "counts did not match")
 	assert.InEpsilon(t, td.Min(), td2.Min(), 0.02, "minimums did not match")
 	assert.InEpsilon(t, td.Max(), td2.Max(), 0.02, "maximums did not match")
 	assert.InEpsilon(t, td.Quantile(0.5), td2.Quantile(0.5), 0.02, "50%% quantiles did not match")
 	assert.Equal(t, td.Sum(), td2.Sum())
 	assert.Equal(t, td.ReciprocalSum(), td2.ReciprocalSum())
+	assert.Equal(t, td.mainCentroids, td2.mainCentroids)
 }
 
 func BenchmarkAdd(b *testing.B) {
 	rand.Seed(time.Now().Unix())
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -190,7 +234,7 @@ func BenchmarkAdd(b *testing.B) {
 
 func BenchmarkQuantile(b *testing.B) {
 	rand.Seed(time.Now().Unix())
-	td := NewMerging(1000, false)
+	td := NewMerging(1000)
 	for i := 0; i < b.N; i++ {
 		td.Add(rand.NormFloat64(), 1.0)
 	}

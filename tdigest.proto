@@ -20,5 +20,4 @@ message MergingDigestData {
 message Centroid {
     double mean = 1;
     double weight = 2;
-    repeated double samples = 3;
 }

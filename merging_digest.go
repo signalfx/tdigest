@@ -36,8 +36,7 @@ type MergingDigest struct {
 	min           float64
 	max           float64
 	reciprocalSum float64
-
-	debug bool
+	count         int16
 }
 
 var _ sort.Interface = centroidList{}
@@ -59,13 +58,7 @@ func (cl centroidList) Swap(i, j int) {
 // Lower compression values result in reduced memory consumption and less
 // precision, especially at the median. Values from 20 to 1000 are recommended
 // in Dunning's paper.
-//
-// The debug flag adds a list to each centroid, which stores all the samples
-// that have gone into that centroid. While this is useful for statistical
-// analysis, it makes the t-digest significantly slower and requires it to
-// store every sample. This defeats the purpose of using an approximating
-// histogram at all, so this feature should only be used in tests.
-func NewMerging(compression float64, debug bool) *MergingDigest {
+func NewMerging(compression float64) *MergingDigest {
 	// this is a provable upper bound on the size of the centroid list
 	// TODO: derive it myself
 	sizeBound := int((math.Pi * compression / 2) + 0.5)
@@ -76,7 +69,6 @@ func NewMerging(compression float64, debug bool) *MergingDigest {
 		tempCentroids: make([]Centroid, 0, estimateTempBuffer(compression)),
 		min:           math.Inf(+1),
 		max:           math.Inf(-1),
-		debug:         debug,
 	}
 }
 
@@ -86,20 +78,40 @@ func NewMerging(compression float64, debug bool) *MergingDigest {
 func NewMergingFromData(d *MergingDigestData) *MergingDigest {
 	td := &MergingDigest{
 		compression:   d.Compression,
-		mainCentroids: d.MainCentroids,
+		mainCentroids: make([]Centroid, len(d.MainCentroids)),
 		tempCentroids: make([]Centroid, 0, estimateTempBuffer(d.Compression)),
 		min:           d.Min,
 		max:           d.Max,
 		reciprocalSum: d.ReciprocalSum,
 	}
 
+	copy(td.mainCentroids, d.MainCentroids)
+
 	// Initialize the weight to the sum of the weights of the centroids
 	td.mainWeight = 0
 	for _, c := range td.mainCentroids {
 		td.mainWeight += c.Weight
 	}
-
 	return td
+}
+
+// Clone gets you a clone of this tdigest
+func (td *MergingDigest) Clone() *MergingDigest {
+	td.mergeAllTemps()
+	ret := &MergingDigest{
+		compression:   td.compression,
+		mainWeight:    td.mainWeight,
+		min:           td.min,
+		max:           td.max,
+		reciprocalSum: td.reciprocalSum,
+		count:         td.count,
+		mainCentroids: make([]Centroid, len(td.mainCentroids)),
+		tempCentroids: make([]Centroid, 0, estimateTempBuffer(td.compression)),
+	}
+
+	copy(ret.mainCentroids, td.mainCentroids)
+
+	return ret
 }
 
 func estimateTempBuffer(compression float64) int {
@@ -129,11 +141,13 @@ func (td *MergingDigest) Add(value float64, weight float64) {
 		Mean:   value,
 		Weight: weight,
 	}
-	if td.debug {
-		next.Samples = []float64{value}
-	}
 	td.tempCentroids = append(td.tempCentroids, next)
 	td.tempWeight += weight
+	td.count++
+	if td.count == 1000 {
+		td.decay(0.9)
+		td.count = 0
+	}
 }
 
 // combine the mainCentroids and tempCentroids in-place into mainCentroids
@@ -244,9 +258,6 @@ func (td *MergingDigest) mergeOne(beforeWeight, totalWeight, beforeIndex float64
 		// weight must be updated before mean
 		td.mainCentroids[len(td.mainCentroids)-1].Weight += next.Weight
 		td.mainCentroids[len(td.mainCentroids)-1].Mean += (next.Mean - td.mainCentroids[len(td.mainCentroids)-1].Mean) * next.Weight / td.mainCentroids[len(td.mainCentroids)-1].Weight
-		if td.debug {
-			td.mainCentroids[len(td.mainCentroids)-1].Samples = append(td.mainCentroids[len(td.mainCentroids)-1].Samples, next.Samples...)
-		}
 
 		// we did not create a new centroid, so the trailing index of the previous
 		// centroid remains
@@ -388,6 +399,19 @@ func (td *MergingDigest) Merge(other *MergingDigest) {
 	td.reciprocalSum = oldReciprocalSum + other.reciprocalSum
 }
 
+// Merge another digest data into this one. Neither td nor other can be shared
+// concurrently during the execution of this method.
+func (td *MergingDigest) MergeData(other *MergingDigestData) {
+	oldReciprocalSum := td.reciprocalSum
+	shuffledIndices := rand.Perm(len(other.MainCentroids))
+
+	for _, i := range shuffledIndices {
+		td.Add(other.MainCentroids[i].Mean, other.MainCentroids[i].Weight)
+	}
+
+	td.reciprocalSum = oldReciprocalSum + other.ReciprocalSum
+}
+
 var _ gob.GobEncoder = &MergingDigest{}
 var _ gob.GobDecoder = &MergingDigest{}
 
@@ -461,9 +485,6 @@ func (td *MergingDigest) GobDecode(b []byte) error {
 //
 // This function will panic if debug is not enabled for this t-digest.
 func (td *MergingDigest) Centroids() []Centroid {
-	if !td.debug {
-		panic("must enable debug to call Centroids()")
-	}
 	td.mergeAllTemps()
 	return td.mainCentroids
 }
@@ -479,5 +500,19 @@ func (td *MergingDigest) Data() *MergingDigestData {
 		Min:           td.min,
 		Max:           td.max,
 		ReciprocalSum: td.reciprocalSum,
+	}
+}
+
+// decay decays the histo to make values at the top less interesting over time
+// the total digest count will converge to `bufferSize / (1 - decayFactor)`
+// if we use `decayFactor` 0.9 and `bufferSize` 1000, this means total count 10000
+// so 99th percentile will not be overly influenced by a few bad values
+// and similarly the ranking/selection will not be
+// (provided we use scale function which keeps small enough bins towards the top)
+func (td *MergingDigest) decay(p float64) {
+	td.mergeAllTemps()
+	for _, c := range td.mainCentroids {
+		c.Weight = c.Weight * p
+		c.Mean = c.Mean * p
 	}
 }
