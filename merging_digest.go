@@ -36,7 +36,9 @@ type MergingDigest struct {
 	min           float64
 	max           float64
 	reciprocalSum float64
-	count         int16
+	count         int32
+	decayEvery    int32
+	decayValue    float64
 }
 
 var _ sort.Interface = centroidList{}
@@ -59,6 +61,11 @@ func (cl centroidList) Swap(i, j int) {
 // precision, especially at the median. Values from 20 to 1000 are recommended
 // in Dunning's paper.
 func NewMerging(compression float64) *MergingDigest {
+	return NewMergingWithDecay(compression, 0, 0)
+}
+
+// Decays by decay factor the centroids, min and max every decayEvery samples
+func NewMergingWithDecay(compression, decay float64, decayEvery int32) *MergingDigest {
 	// this is a provable upper bound on the size of the centroid list
 	// TODO: derive it myself
 	sizeBound := int((math.Pi * compression / 2) + 0.5)
@@ -69,6 +76,8 @@ func NewMerging(compression float64) *MergingDigest {
 		tempCentroids: make([]Centroid, 0, estimateTempBuffer(compression)),
 		min:           math.Inf(+1),
 		max:           math.Inf(-1),
+		decayValue:    decay,
+		decayEvery:    decayEvery,
 	}
 }
 
@@ -83,6 +92,8 @@ func NewMergingFromData(d *MergingDigestData) *MergingDigest {
 		min:           d.Min,
 		max:           d.Max,
 		reciprocalSum: d.ReciprocalSum,
+		decayValue:    d.Decay,
+		decayEvery: d.DecayEvery,
 	}
 
 	copy(td.mainCentroids, d.MainCentroids)
@@ -143,10 +154,12 @@ func (td *MergingDigest) Add(value float64, weight float64) {
 	}
 	td.tempCentroids = append(td.tempCentroids, next)
 	td.tempWeight += weight
-	td.count++
-	if td.count == 1000 {
-		td.decay(0.9)
-		td.count = 0
+	if td.decayValue > 0 {
+		td.count++
+		if td.count >= td.decayEvery {
+			td.decay()
+			td.count = 0
+		}
 	}
 }
 
@@ -500,6 +513,8 @@ func (td *MergingDigest) Data() *MergingDigestData {
 		Min:           td.min,
 		Max:           td.max,
 		ReciprocalSum: td.reciprocalSum,
+		Decay:         td.decayValue,
+		DecayEvery: td.decayEvery,
 	}
 }
 
@@ -509,10 +524,11 @@ func (td *MergingDigest) Data() *MergingDigestData {
 // so 99th percentile will not be overly influenced by a few bad values
 // and similarly the ranking/selection will not be
 // (provided we use scale function which keeps small enough bins towards the top)
-func (td *MergingDigest) decay(p float64) {
+func (td *MergingDigest) decay() {
 	td.mergeAllTemps()
 	for _, c := range td.mainCentroids {
-		c.Weight = c.Weight * p
-		c.Mean = c.Mean * p
+		c.Weight = c.Weight * td.decayValue
+		c.Mean = c.Mean * td.decayValue
 	}
+	td.max = td.max * td.decayValue
 }

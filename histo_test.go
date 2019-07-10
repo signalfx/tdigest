@@ -222,6 +222,23 @@ func showEqualUpTo(t *testing.T, td *MergingDigest, td2 *MergingDigest) {
 	assert.Equal(t, td.mainCentroids, td2.mainCentroids)
 }
 
+func TestDecay(t *testing.T) {
+	td := NewMergingWithDecay(1000, 0.9)
+	for i := 0; i < 999; i++ {
+		td.Add(rand.Float64(), 1.0)
+	}
+	max := td.Max()
+	min := td.Min()
+	p99 := td.Quantile(0.99)
+	td.Add(rand.Float64(), 1.0)
+	nmax := td.Max()
+	nmin := td.Min()
+	np99 := td.Quantile(0.99)
+	assert.True(t, max > nmax)
+	assert.True(t, min > nmin)
+	assert.True(t, p99 > np99)
+}
+
 func BenchmarkAdd(b *testing.B) {
 	rand.Seed(time.Now().Unix())
 	td := NewMerging(1000)
