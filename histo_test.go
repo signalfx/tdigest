@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stretchr/testify/assert"
+	"fmt"
 )
 
 func TestMergingDigest(t *testing.T) {
@@ -223,20 +224,51 @@ func showEqualUpTo(t *testing.T, td *MergingDigest, td2 *MergingDigest) {
 }
 
 func TestDecay(t *testing.T) {
-	td := NewMergingWithDecay(1000, 0.9)
+	td := NewMergingWithDecay(100, 0.9, 1000)
 	for i := 0; i < 999; i++ {
 		td.Add(rand.Float64(), 1.0)
 	}
+
 	max := td.Max()
 	min := td.Min()
 	p99 := td.Quantile(0.99)
+	p50 := td.Quantile(0.50)
 	td.Add(rand.Float64(), 1.0)
 	nmax := td.Max()
 	nmin := td.Min()
 	np99 := td.Quantile(0.99)
-	assert.True(t, max > nmax)
-	assert.True(t, min > nmin)
-	assert.True(t, p99 > np99)
+	np50 := td.Quantile(0.50)
+	assert.Equal(t, max, nmax)
+	assert.Equal(t, min, nmin)
+	assert.True(t, p99> np99)
+	assert.True(t, p50> np50)
+	var weight float64
+	for _, c := range td.Centroids() {
+		weight += c.Weight
+	}
+	assert.Equal(t, weight, td.mainWeight)
+
+	// test decay removal
+	for i := 0; i < 98; i++ {
+		td.decay()
+	}
+
+	for _, c := range td.Centroids() {
+		fmt.Println(c.Mean, c.Weight)
+	}
+
+	fmt.Println( len(td.Centroids()), td.Max())
+	td.decay()
+	fmt.Println( len(td.Centroids()), td.Max())
+
+	for _, c := range td.Centroids() {
+		fmt.Println(c.Mean, c.Weight)
+	}
+
+	for len(td.mainCentroids) > 0 {
+		td.decay()
+	}
+	// didn't explode
 }
 
 func BenchmarkAdd(b *testing.B) {

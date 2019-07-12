@@ -93,7 +93,7 @@ func NewMergingFromData(d *MergingDigestData) *MergingDigest {
 		max:           d.Max,
 		reciprocalSum: d.ReciprocalSum,
 		decayValue:    d.Decay,
-		decayEvery: d.DecayEvery,
+		decayEvery:    d.DecayEvery,
 	}
 
 	copy(td.mainCentroids, d.MainCentroids)
@@ -514,7 +514,7 @@ func (td *MergingDigest) Data() *MergingDigestData {
 		Max:           td.max,
 		ReciprocalSum: td.reciprocalSum,
 		Decay:         td.decayValue,
-		DecayEvery: td.decayEvery,
+		DecayEvery:    td.decayEvery,
 	}
 }
 
@@ -524,11 +524,35 @@ func (td *MergingDigest) Data() *MergingDigestData {
 // so 99th percentile will not be overly influenced by a few bad values
 // and similarly the ranking/selection will not be
 // (provided we use scale function which keeps small enough bins towards the top)
+const decayLimit = 0.00002656139889
+
 func (td *MergingDigest) decay() {
 	td.mergeAllTemps()
-	for _, c := range td.mainCentroids {
+	var weight float64
+	var remove []int
+	for i := range td.mainCentroids {
+		c := &td.mainCentroids[i]
 		c.Weight = c.Weight * td.decayValue
-		c.Mean = c.Mean * td.decayValue
+		if c.Weight < decayLimit {
+			remove = append(remove, i)
+		} else {
+			weight += c.Weight
+		}
 	}
-	td.max = td.max * td.decayValue
+	if len(remove) > 0 {
+		for i, c := range remove {
+			calculated := c - i
+			td.mainCentroids = append(td.mainCentroids[:calculated], td.mainCentroids[calculated+1:]...)
+		}
+		if len(td.mainCentroids) > 0 {
+			td.max = td.mainCentroids[len(td.mainCentroids)-1].Mean
+			td.min = td.mainCentroids[0].Mean
+		} else {
+			td.min = math.Inf(+1)
+			td.max = math.Inf(-1)
+		}
+	}
+
+	td.mainWeight = weight
+
 }
