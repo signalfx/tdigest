@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/stretchr/testify/assert"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMergingDigest(t *testing.T) {
@@ -104,7 +104,7 @@ func TestGobEncoding(t *testing.T) {
 	td2 := NewMerging(1000)
 	assert.NoError(t, td2.GobDecode(buf), "should have decoded successfully")
 
-	assert.InEpsilon(t, td.Count(), td2.Count(), 0.02, "counts did not match")
+	assert.InEpsilon(t, td.Weight(), td2.Weight(), 0.02, "counts did not match")
 	assert.InEpsilon(t, td.Min(), td2.Min(), 0.02, "minimums did not match")
 	assert.InEpsilon(t, td.Max(), td2.Max(), 0.02, "maximums did not match")
 	assert.InEpsilon(t, td.Quantile(0.5), td2.Quantile(0.5), 0.02, "50%% quantiles did not match")
@@ -162,7 +162,7 @@ func TestGobDecodeOldGob(t *testing.T) {
 	buf := deserializeGob(t, "oldgob.base64")
 	assert.NoError(t, td.GobDecode(buf), "should have decoded successfully")
 
-	assert.InEpsilon(t, 1000, td.Count(), 0.02, "counts did not match")
+	assert.InEpsilon(t, 1000, td.Weight(), 0.02, "counts did not match")
 	assert.InDelta(t, 0.01, td.Min(), 0.02, "minimums did not match")
 	assert.InEpsilon(t, 1000, td.Max(), 0.02, "maximums did not match")
 	assert.InEpsilon(t, 500, td.Quantile(0.5), 0.02, "50%% quantiles did not match")
@@ -214,7 +214,7 @@ func TestClone(t *testing.T) {
 }
 
 func showEqualUpTo(t *testing.T, td *MergingDigest, td2 *MergingDigest) {
-	assert.InEpsilon(t, td.Count(), td2.Count(), 0.02, "counts did not match")
+	assert.InEpsilon(t, td.Weight(), td2.Weight(), 0.02, "counts did not match")
 	assert.InEpsilon(t, td.Min(), td2.Min(), 0.02, "minimums did not match")
 	assert.InEpsilon(t, td.Max(), td2.Max(), 0.02, "maximums did not match")
 	assert.InEpsilon(t, td.Quantile(0.5), td2.Quantile(0.5), 0.02, "50%% quantiles did not match")
@@ -233,15 +233,17 @@ func TestDecay(t *testing.T) {
 	min := td.Min()
 	p99 := td.Quantile(0.99)
 	p50 := td.Quantile(0.50)
+	fmt.Println( min, p50, p99, max)
 	td.Add(rand.Float64(), 1.0)
 	nmax := td.Max()
 	nmin := td.Min()
 	np99 := td.Quantile(0.99)
 	np50 := td.Quantile(0.50)
+	fmt.Println( nmin, np50, np99, nmax)
 	assert.Equal(t, max, nmax)
 	assert.Equal(t, min, nmin)
-	assert.True(t, p99> np99)
-	assert.True(t, p50> np50)
+	assert.True(t, p99 > np99)
+	assert.True(t, p50 >= np50)
 	var weight float64
 	for _, c := range td.Centroids() {
 		weight += c.Weight
@@ -257,9 +259,9 @@ func TestDecay(t *testing.T) {
 		fmt.Println(c.Mean, c.Weight)
 	}
 
-	fmt.Println( len(td.Centroids()), td.Max())
+	fmt.Println(len(td.Centroids()), td.Max())
 	td.decay()
-	fmt.Println( len(td.Centroids()), td.Max())
+	fmt.Println(len(td.Centroids()), td.Max())
 
 	for _, c := range td.Centroids() {
 		fmt.Println(c.Mean, c.Weight)
@@ -269,6 +271,7 @@ func TestDecay(t *testing.T) {
 		td.decay()
 	}
 	// didn't explode
+	assert.Equal(t, td.Count(), int64(1000))
 }
 
 func BenchmarkAdd(b *testing.B) {
