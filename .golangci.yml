@@ -1,0 +1,39 @@
+run:
+  concurrency: 6
+  deadline: 10m
+  skip-dirs:
+    - .circleci
+    - .git
+    - .idea
+    - output
+    - vendor
+    - scripts
+
+linters:
+  enable-all: true
+  disable:
+    # Line length is only a problem if it impedes readability, which should be
+    # determined at code review time.
+    - lll
+    # We use init funcs pretty heavily to register montiors at startup
+    - gochecknoinits
+    # This flags things a lot when it is impossible to know how big the backing
+    # array should be.
+    #- prealloc
+    # There are many legitimate uses of globals
+    - gochecknoglobals
+
+issues:
+  exclude-rules:
+    # Exclude some linters from test files
+    - path: "_test.go"
+      linters:
+        # there are discrete test functions that return nil errors in order to comply with function signatures
+        - unparam
+    # Checking errors before deferring causes ports to stay open for some libraries
+    - text: SA5001
+      linters:
+        - staticcheck
+    - text: G102
+      linters:
+        - gosec
