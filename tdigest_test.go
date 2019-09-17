@@ -92,7 +92,7 @@ func TestTdigest_Quantile(t *testing.T) {
 		for _, bt := range benchmarks {
 			bt := bt
 			t.Run(tt.name+"-"+bt.name, func(t *testing.T) {
-				td := NewWithScaler(bt.scale, 1000, 0, 0)
+				td := NewWithScaler(bt.scale, 1000, benchmarkDecayValue, benchmarkDecayEvery)
 				for _, x := range tt.data {
 					td.Add(x, 1)
 				}
@@ -186,7 +186,7 @@ func TestTdigest_CDFs(t *testing.T) {
 		for _, bt := range benchmarks {
 			bt := bt
 			t.Run(tt.name+"-"+bt.name, func(t *testing.T) {
-				td := NewWithScaler(bt.scale, 1000, 0, 0)
+				td := NewWithScaler(bt.scale, 1000, benchmarkDecayValue, benchmarkDecayEvery)
 				for _, x := range tt.data {
 					td.Add(x, 1)
 				}
@@ -248,7 +248,7 @@ func TestSizesVsCap(t *testing.T) {
 	for _, test := range benchmarks {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			td := NewWithScaler(test.scale, 50, 0, 0)
+			td := NewWithScaler(test.scale, 50, benchmarkDecayValue, benchmarkDecayEvery)
 			n := 100000
 			for i := 0; i < n; i++ {
 				td.Add(getVal(), 1.0)
@@ -338,7 +338,7 @@ func BenchmarkCompression(b *testing.B) {
 		bm := bm
 		b.Run("Compression "+strconv.Itoa(bm.compression), func(b *testing.B) {
 			b.ReportAllocs()
-			td := NewWithDecay(float64(bm.compression), benchmarkDecayValue, benchmarkDecayEvery)
+			td := NewWithCompression(float64(bm.compression))
 			data := make([]float64, b.N)
 			for i := 0; i < b.N; i++ {
 				data[i] = getVal()
@@ -371,8 +371,8 @@ func BenchmarkMultipleHistos(b *testing.B) {
 		b.Run(bm.name+"-double", func(b *testing.B) {
 			data := getData(b)
 			b.ReportAllocs()
-			td := NewWithDecay(benchmarkCompression, benchmarkDecayValue, benchmarkDecayEvery)
-			td2 := NewWithDecay(benchmarkCompression, benchmarkDecayValue, benchmarkDecayEvery)
+			td := NewWithCompression(benchmarkCompression)
+			td2 := NewWithCompression(benchmarkCompression)
 			for i := 0; i < b.N; i++ {
 				td.Add(data[i], 1)
 				td2.Add(data[i], 1)
@@ -384,8 +384,8 @@ func BenchmarkMultipleHistos(b *testing.B) {
 		b.Run(bm.name+"-merge", func(b *testing.B) {
 			data := getData(b)
 			b.ReportAllocs()
-			td := NewWithDecay(benchmarkCompression, benchmarkDecayValue, benchmarkDecayEvery)
-			td2 := NewWithDecay(benchmarkCompression, benchmarkDecayValue, benchmarkDecayEvery)
+			td := NewWithCompression(benchmarkCompression)
+			td2 := NewWithCompression(benchmarkCompression)
 			for i := 0; i < b.N; i++ {
 				td2.Add(data[i], 1)
 				if int64(i)%bm.size == 0 && i != 0 {
@@ -400,7 +400,7 @@ func BenchmarkMultipleHistos(b *testing.B) {
 		b.Run(bm.name+"-regular", func(b *testing.B) {
 			data := getData(b)
 			b.ReportAllocs()
-			td := NewWithDecay(benchmarkCompression, benchmarkDecayValue, benchmarkDecayEvery)
+			td := NewWithCompression(benchmarkCompression)
 			for i := 0; i < b.N; i++ {
 				td.Add(data[i], 1)
 			}
@@ -425,7 +425,7 @@ func BenchmarkHistoSerde(b *testing.B) {
 		b.Run(strconv.Itoa(bm), func(b *testing.B) {
 			data := getData(b)
 			b.ResetTimer()
-			td := NewWithDecay(benchmarkCompression, benchmarkDecayValue, benchmarkDecayEvery)
+			td := NewWithCompression(benchmarkCompression)
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				if i > 0 && i%bm == 0 {
@@ -491,7 +491,7 @@ func TestWriteOutFiles(t *testing.T) {
 		for _, test := range benchmarks {
 			test := test
 			t.Run(test.name, func(t *testing.T) {
-				td := NewWithScaler(test.scale, 100, 0, 0)
+				td := NewWithScaler(test.scale, 100, benchmarkDecayValue, benchmarkDecayEvery)
 				for _, v := range data {
 					td.Add(v, 1)
 				}
@@ -526,5 +526,15 @@ func TestWriteOutFiles(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestWithDecay(t *testing.T) {
+	td := New()
+	for i := float64(0); i < 1000000; i++ {
+		if td.TotalWeight() >= 10000 {
+			td.Decay(0.9, 0.00002656139889)
+		}
+		assert.True(t, td.TotalWeight() < 10000)
 	}
 }

@@ -3,6 +3,8 @@ package tdigest_test
 import (
 	"testing"
 
+	"fmt"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/signalfx/tdigest"
 	"github.com/stretchr/testify/assert"
@@ -127,4 +129,24 @@ func TestNewCentroidList(t *testing.T) {
 func TestCentroid_String(t *testing.T) {
 	c := tdigest.Centroid{Weight: 1, Mean: 7}
 	assert.Equal(t, c.String(), "{mean: 7.000000 weight: 1.000000}")
+}
+
+func TestCentroidListSerde(t *testing.T) {
+	c := tdigest.NewWithCompression(50)
+	for i := 0; i < 100; i++ {
+		c.Add(float64(i), 1)
+	}
+	cc := make(tdigest.CentroidList, len(c.Centroids()))
+	copy(cc, c.Centroids())
+	bb, err := cc.MarshalBinary()
+	fmt.Println(bb)
+	assert.Nil(t, err)
+	c1 := tdigest.NewWithCompression(50)
+	err = tdigest.UnmarshalCentroidListIntoTdigest(bb, c1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(c.Centroids()), len(c1.Centroids()))
+	for i, v := range c1.Centroids() {
+		assert.Equal(t, v, cc[i])
+	}
+	fmt.Println(cc)
 }
