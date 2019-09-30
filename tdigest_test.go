@@ -532,9 +532,23 @@ func TestWriteOutFiles(t *testing.T) {
 func TestWithDecay(t *testing.T) {
 	td := New()
 	for i := float64(0); i < 1000000; i++ {
+		td.Add(i, 1)
+		if i > 0 && int(td.TotalWeight())%1000 == 0 {
+			assert.True(t, td.Max() < 1000000)
+			assert.True(t, td.Min() > 0)
+			fmt.Println(td.Max(), td.Min())
+		}
 		if td.TotalWeight() >= 10000 {
 			td.Decay(0.9, 0.00002656139889)
 		}
 		assert.True(t, td.TotalWeight() < 10000)
 	}
+}
+
+func TestMinMax(t *testing.T) {
+	//{"caller":"histo.go:266","message":"inf81 \u0026{0x1e0dbe0 50 35 250 [{19343 1}] [] [0.5 1] 1 0 1.7976931348623157e+308 -1.7976931348623157e+308 1 0 0 0}","protocol":"Sampler","time":"2019-09-30T18:46:14Z"}
+	td := NewWithCompression(50)
+	td.Add(19343, 1)
+	assert.Equal(t, td.Min(), float64(19343))
+	assert.Equal(t, td.Max(), float64(19343))
 }
