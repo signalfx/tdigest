@@ -9,7 +9,7 @@ import (
 
 // add the values [0,n) to a centroid set, equal weights
 func simpleTDigest(n int) *TDigest {
-	d := NewWithDecay(1000, 0.9, 500)
+	d := New()
 	for i := 0; i < n; i++ {
 		d.Add(float64(i), 1)
 	}
